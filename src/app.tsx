@@ -236,45 +236,135 @@ class PregnancyKnowledgeBase {
     let hasAnswer = false;
     let response = "";
     
-    // Week queries
-    const weekMatch = lower.match(/week\s*(\d+)/);
+    // Week queries - more flexible matching
+    const weekMatch = lower.match(/(week|weeks|trimester|month).*?(\d+)/);
     if (weekMatch) {
-      const week = parseInt(weekMatch[1]);
+      const week = parseInt(weekMatch[2]);
       const info = this.getWeekInfo(week);
       if (info) {
         hasAnswer = true;
-        response = `Week ${week} (${info.trimester} Trimester): ${info.title}\n\nCommon symptoms:\n${info.commonSymptoms.map(s => `• ${s.symptom}: ${s.status}`).join('\n')}`;
-      }
-    }
-    
-    // Medication queries
-    if (lower.includes('tylenol') || lower.includes('advil') || lower.includes('medication')) {
-      const medMatch = lower.match(/(?:is|can i take)\s+(\w+)/);
-      if (medMatch) {
-        const results = this.checkMedicationSafety(medMatch[1]);
-        if (results.length > 0) {
-          hasAnswer = true;
-          const med = results[0];
-          response = `${med.drug} (${med.brand}): ${med.safetyLevel} ${med.safety}\n${med.note ? `Note: ${med.note}` : ''}`;
+        response = `### Week ${week} (${info.trimester} Trimester)\n**${info.title}**\n\n**Common symptoms:**\n${
+          info.commonSymptoms.map(s => `- ${s.symptom}: ${s.status}`).join('\n')
+        }`;
+        
+        if (info.exercise) {
+          response += `\n\n**Recommended exercise:** ${info.exercise.name}\n**Benefits:** ${
+            info.exercise.benefits
+          }\n**Instructions:**\n${
+            info.exercise.instructions.map((inst, i) => `${i+1}. ${inst}`).join('\n')
+          }`;
         }
       }
     }
     
-    // Symptom queries
-    if (lower.includes('bleeding') || lower.includes('pain') || lower.includes('fever')) {
-      const symptoms = this.getSymptomInfo(lower);
-      if (symptoms.length > 0) {
-        hasAnswer = true;
-        const s = symptoms[0];
-        response = `${s.sign}:\n• Action: ${s.action}\n• Contact provider: ${s.urgency}\n• Category: ${s.category}`;
+    // Medication queries - expanded matching
+    const medKeywords = ['medication', 'medicine', 'drug', 'pill', 'safe to take', 'can i take', 'is it safe'];
+    const medMatch = lower.match(new RegExp(`(${medKeywords.join('|')})[\\s\\w]*?(\\w+)`, 'i'));
+    if (medMatch || medKeywords.some(kw => lower.includes(kw))) {
+      let medName = medMatch?.[2] || input.split(/\s+/).pop() || '';
+      if (medName) {
+        const results = this.checkMedicationSafety(medName);
+        if (results.length > 0) {
+          hasAnswer = true;
+          response = results.map(med => 
+            `### ${med.drug}${med.brand ? ` (${med.brand})` : ''}\n` +
+            `**Safety:** ${med.safety} ${med.safetyLevel}\n` +
+            `${med.note ? `**Note:** ${med.note}\n` : ''}` +
+            `**For:** ${med.condition}`
+          ).join('\n\n');
+        }
       }
     }
     
-    // Nutrition queries
-    if (lower.includes('nutrition') || lower.includes('vitamin') || lower.includes('diet')) {
+    // Symptom queries - expanded matching
+    const symptomKeywords = ['symptom', 'sign', 'feel', 'experience', 'having', 'bleeding', 'pain', 'ache', 
+                            'fever', 'headache', 'nausea', 'dizziness', 'discharge', 'cramp'];
+    if (symptomKeywords.some(kw => lower.includes(kw))) {
+      const symptoms = this.getSymptomInfo(lower);
+      if (symptoms.length > 0) {
+        hasAnswer = true;
+        response = symptoms.map(s => 
+          `### ${s.sign}\n` +
+          `**Category:** ${s.category}\n` +
+          `**Urgency:** ${s.urgency}\n` +
+          `**Action:** ${s.action}\n` +
+          `**Severity:** ${s.severity}`
+        ).join('\n\n');
+      }
+    }
+    
+    // Nutrition queries - expanded matching
+    const nutritionKeywords = ['nutrition', 'nutrient', 'vitamin', 'mineral', 'diet', 'eat', 'food', 
+                              'meal', 'intake', 'requirement', 'macro'];
+    if (nutritionKeywords.some(kw => lower.includes(kw))) {
       hasAnswer = true;
       const nutrients = this.data.nutritionalRequirements.dailyMacros;
-      response = `Daily Nutritional Requirements:\n${nutrients.map(n => `• ${n.nutrient}: ${n.amount} ${n.unit}`).join('\n')}`;
+      response = `### Daily Nutritional Requirements\n${
+        nutrients.map(n => `- **${n.nutrient}:** ${n.amount} ${n.unit} (${n.category})`).join('\n')
+      }`;
+      
+      // Add weight gain info if query mentions weight
+      if (lower.includes('weight') || lower.includes('gain') || lower.includes('bmi')) {
+        const weightInfo = this.data.nutritionalRequirements.weightGainRecommendations;
+        response += `\n\n### Recommended Weight Gain\n${
+          weightInfo.map(w => 
+            `- **${w.prePregnancyBMI}** (BMI ${w.bmiRange}): ${w.recommendedGain} ${w.unit}`
+          ).join('\n')
+        }`;
+      }
+    }
+    
+    // Food safety queries
+    if (lower.includes('food safety') || lower.includes('avoid') || lower.includes('unsafe')) {
+      hasAnswer = true;
+      const unsafeSeafood = this.data.foodSafety.seafoodGuidelines.unsafe.join(', ');
+      const avoidFoods = this.data.foodSafety.avoidFoods.map(f => 
+        `- ${f.item}${f.includes ? ` (includes ${f.includes.join(', ')})` : ''}`
+      ).join('\n');
+      
+      response = `### Foods to Avoid\n**Unsafe Seafood (High Mercury):** ${unsafeSeafood}\n\n**Other Foods to Avoid:**\n${avoidFoods}`;
+    }
+    
+    // Morning sickness queries
+    if (lower.includes('morning sickness') || lower.includes('nausea')) {
+      hasAnswer = true;
+      const tips = this.data.morningSicknessManagement;
+      response = `### Managing Morning Sickness\n**What to eat:** ${tips.whatToEat.join(', ')}\n\n` +
+                 `**Avoid:** ${tips.avoidFoods.join(', ')}\n\n` +
+                 `**Eating Tips:**\n${tips.eatingTips.map(t => `- ${t}`).join('\n')}\n\n` +
+                 `**Hydration Tips:**\n${tips.hydrationTips.map(t => `- ${t}`).join('\n')}`;
+    }
+    
+    // Emergency symptom queries
+    if (lower.includes('emergency') || lower.includes('urgent') || lower.includes('immediately')) {
+      const emergencies = this.getEmergencySymptoms();
+      if (emergencies.length > 0) {
+        hasAnswer = true;
+        response = `### Emergency Symptoms\n${
+          emergencies.map(e => 
+            `- **${e.sign}** (${e.category}): Seek help ${e.urgency} - ${e.action}`
+          ).join('\n')
+        }`;
+      }
+    }
+    
+    if (!hasAnswer) {
+      // Try a more general search before giving up
+      const generalSymptomResults = this.getSymptomInfo(input);
+      if (generalSymptomResults.length > 0) {
+        hasAnswer = true;
+        response = `I found these symptoms that might relate to your question:\n${
+          generalSymptomResults.map(s => `- ${s.sign}: ${s.action} (${s.urgency})`).join('\n')
+        }`;
+      }
+      
+      const generalMedResults = this.checkMedicationSafety(input);
+      if (generalMedResults.length > 0) {
+        hasAnswer = true;
+        response = `I found these medications that might relate to your question:\n${
+          generalMedResults.map(m => `- ${m.drug}: ${m.safetyLevel}`).join('\n')
+        }`;
+      }
     }
     
     if (!hasAnswer) {
