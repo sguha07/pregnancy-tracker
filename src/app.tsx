@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, Pill, AlertCircle, Apple, MessageCircle, Home, Baby, ChevronRight, Send, X, Search, Heart, Activity, FileText, AlertTriangle, CheckCircle } from 'lucide-react';
-import axios from 'axios';
+import OpenAI from 'openai';
 
 // ==================== TYPES ====================
 type Nutrient = {
@@ -22,6 +22,7 @@ type Symptom = {
   urgency: string;
   action: string;
   severity: 'low' | 'medium' | 'high';
+  category?: string;
 };
 
 type Medication = {
@@ -30,6 +31,7 @@ type Medication = {
   safety: string;
   safetyLevel: string;
   note?: string;
+  condition?: string;
 };
 
 type WeekInfo = {
@@ -51,149 +53,192 @@ type Message = {
 
 type Tab = 'home' | 'tracker' | 'medications' | 'symptoms' | 'nutrition' | 'emergency' | 'chat';
 
-// ==================== KNOWLEDGE GRAPH ====================
-const knowledgeGraph = {
-  pregnancyKnowledgeGraph: {
-    nutritionalRequirements: {
-      dailyMacros: [
-        { nutrient: "Folic Acid", amount: "600-800", unit: "mcg", category: "vitamin" },
-        { nutrient: "Calcium", amount: "1000-2500", unit: "mg", category: "mineral" },
-        { nutrient: "Protein", amount: "88", unit: "gm", category: "macronutrient" },
-        { nutrient: "Iron", amount: "27", unit: "mg", category: "mineral" },
-        { nutrient: "Vitamin D", amount: "600", unit: "IUs", category: "vitamin" }
-      ] as Nutrient[],
-      weightGainRecommendations: [
-        { prePregnancyBMI: "Underweight", bmiRange: "<18.5", recommendedGain: "28-40", unit: "pounds" },
-        { prePregnancyBMI: "Healthy weight", bmiRange: "18.5-24.9", recommendedGain: "25-35", unit: "pounds" },
-        { prePregnancyBMI: "Overweight", bmiRange: "25-29.9", recommendedGain: "15-25", unit: "pounds" },
-        { prePregnancyBMI: "Obese", bmiRange: "≥30", recommendedGain: "11-20", unit: "pounds" }
-      ] as WeightGainRecommendation[]
-    },
-    foodSafety: {
-      seafoodGuidelines: {
-        safe: ["Rawas"],
-        unsafe: ["Bangda", "Pamplet", "Surmai", "Katla", "Rohu", "Swordfish", "Tilefish", "Tuna (bigeye, albacore)", "Mori", "Waghbeer"]
-      },
-      avoidFoods: [
-        { item: "Non-pasteurized dairy", includes: ["home made yogurt"] },
-        { item: "Caffeine", includes: ["Tea", "carbonated beverages", "cocoa", "chocolate"] },
-        { item: "Vitamin A supplements", details: "Avoid preformed vitamin A (retinol)" }
-      ]
-    },
-    morningSicknessManagement: {
-      whatToEat: ["Bland, dry foods", "Protein-rich foods", "Ginger-based foods"],
-      avoidFoods: ["Greasy foods", "Spicy foods", "Fatty foods"],
-      eatingTips: ["Eat crackers before getting up", "Snack often", "Don't let stomach go empty"],
-      hydrationTips: ["Sip water or ginger ale", "Suck on ice chips"]
-    },
-    pregnancyTimeline: {
-      weeks9to12: {
-        trimester: "First",
-        title: "Third Month: Nearing End of First Trimester",
-        commonSymptoms: [
-          { symptom: "Morning sickness", status: "Peaks now, eases by weeks 13-14" },
-          { symptom: "Fatigue & dizziness", status: "Heart working harder" },
-          { symptom: "Breast soreness", status: "Body growing and stretching" },
-          { symptom: "Frequent urination", status: "Uterus pressing on bladder" }
-        ],
-        exercise: {
-          name: "Side plank",
-          benefits: "Strengthens core muscles",
-          instructions: ["Lie on side", "Raise onto forearm", "Hold position", "Repeat 5-10 times"]
-        }
-      },
-      weeks13to16: {
-        trimester: "Second",
-        title: "Golden Period - Second Trimester Begins",
-        commonSymptoms: [
-          { symptom: "Energy returning", status: "Nausea and fatigue easing" },
-          { symptom: "Nasal congestion", status: "Increased blood flow" },
-          { symptom: "Skin changes", status: "Darker patches may appear" },
-          { symptom: "Belly growth", status: "May start showing" }
-        ],
-        exercise: {
-          name: "Back press",
-          benefits: "Supports good posture",
-          instructions: ["Stand against wall", "Press lower back to wall", "Hold several seconds", "Repeat 5-10 times"]
-        }
-      }
-    },
-    symptomTroubleshooting: {
-      categories: [
-        {
-          category: "Vaginal Bleeding/Discharge",
-          symptoms: [
-            { sign: "Slight spotting < 1 day", urgency: "Within 24 hrs", action: "Monitor", severity: "low" },
-            { sign: "Heavy bleeding", urgency: "Immediately", action: "Emergency", severity: "high" },
-            { sign: "Green/yellow discharge", urgency: "Within 24 hrs", action: "Infection risk", severity: "medium" }
-          ]
-        },
-        {
-          category: "Pain",
-          symptoms: [
-            { sign: "Mild cramping", urgency: "Next visit", action: "Common", severity: "low" },
-            { sign: "Severe headache with vision changes", urgency: "Immediately", action: "Emergency", severity: "high" },
-            { sign: "Leg pain with swelling", urgency: "Immediately", action: "Blood clot risk", severity: "high" }
-          ]
-        },
-        {
-          category: "Other Symptoms",
-          symptoms: [
-            { sign: "Fever < 102°F", urgency: "Within 24 hrs", action: "Monitor", severity: "medium" },
-            { sign: "Fever ≥ 102°F", urgency: "Immediately", action: "High risk", severity: "high" },
-            { sign: "Sudden face/hand swelling", urgency: "Same day", action: "Preeclampsia sign", severity: "high" }
-          ]
-        }
-      ]
-    },
-    medications: {
-      byCondition: [
-        {
-          condition: "Pain and Fever",
-          medications: [
-            { drug: "Acetaminophen", brand: "Tylenol", safety: "🟢", safetyLevel: "Generally Safe" },
-            { drug: "Ibuprofen", brand: "Advil", safety: "🟡", safetyLevel: "Use with Caution", note: "Only 1st/2nd trimester" },
-            { drug: "Aspirin", safety: "🔴", safetyLevel: "Avoid", note: "Unless directed by doctor" }
-          ]
-        },
-        {
-          condition: "Allergies/Cold",
-          medications: [
-            { drug: "Cetirizine", brand: "Zyrtec", safety: "🟢", safetyLevel: "Generally Safe" },
-            { drug: "Loratadine", brand: "Claritin", safety: "🟢", safetyLevel: "Generally Safe" },
-            { drug: "Pseudoephedrine", brand: "Sudafed", safety: "🟡", safetyLevel: "Use with Caution", note: "Avoid 1st trimester" }
-          ]
-        },
-        {
-          condition: "Heartburn",
-          medications: [
-            { drug: "Calcium carbonate", brand: "Tums", safety: "🟢", safetyLevel: "Generally Safe" },
-            { drug: "Famotidine", brand: "Pepcid", safety: "🟢", safetyLevel: "Generally Safe" }
-          ]
-        }
-      ]
-    }
-  }
+type KnowledgeSection = {
+  id: string;
+  content: string;
+  embedding?: number[];
 };
 
-// ==================== KNOWLEDGE BASE CLASS ====================
-class PregnancyKnowledgeBase {
-  private data: typeof knowledgeGraph.pregnancyKnowledgeGraph;
+// ==================== KNOWLEDGE BASE SERVICE ====================
+class KnowledgeBaseService {
+  private knowledgeBase: any = null;
+  private sections: KnowledgeSection[] = [];
+  private openai: OpenAI | null = null;
+  private embeddingsGenerated = false;
 
-  constructor(data: typeof knowledgeGraph) {
-    this.data = data.pregnancyKnowledgeGraph;
+  constructor() {
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    if (apiKey) {
+      this.openai = new OpenAI({
+        apiKey: apiKey,
+        dangerouslyAllowBrowser: true // Note: In production, use a backend proxy
+      });
+    }
+  }
+
+  async initialize() {
+    // Load knowledge base
+    try {
+      const response = await fetch('/knowledgeBase.json');
+      const data = await response.json();
+      this.knowledgeBase = data.pregnancyKnowledgeGraph;
+      
+      // Convert knowledge base to searchable sections
+      this.createSections();
+      
+      // Generate embeddings if OpenAI is available
+      if (this.openai) {
+        await this.generateEmbeddings();
+      }
+    } catch (error) {
+      console.error('Failed to load knowledge base:', error);
+    }
+  }
+
+  private createSections() {
+    // Flatten knowledge base into searchable sections
+    const kb = this.knowledgeBase;
+    
+    // Nutritional requirements
+    this.sections.push({
+      id: 'nutrition-daily',
+      content: `Daily nutritional requirements during pregnancy: ${kb.nutritionalRequirements.dailyMacros.map((n: Nutrient) => 
+        `${n.nutrient}: ${n.amount} ${n.unit} (${n.category})`).join(', ')}`
+    });
+
+    // Weight gain recommendations
+    this.sections.push({
+      id: 'nutrition-weight',
+      content: `Weight gain recommendations: ${kb.nutritionalRequirements.weightGainRecommendations.map((w: WeightGainRecommendation) => 
+        `${w.prePregnancyBMI} (BMI ${w.bmiRange}): ${w.recommendedGain} ${w.unit}`).join(', ')}`
+    });
+
+    // Food safety
+    this.sections.push({
+      id: 'food-safety',
+      content: `Foods to avoid during pregnancy: Unsafe seafood (${kb.foodSafety.seafoodGuidelines.unsafe.join(', ')}), 
+        ${kb.foodSafety.avoidFoods.map((f: any) => f.item).join(', ')}`
+    });
+
+    // Morning sickness
+    this.sections.push({
+      id: 'morning-sickness',
+      content: `Morning sickness management: Eat ${kb.morningSicknessManagement.whatToEat.join(', ')}. 
+        Avoid ${kb.morningSicknessManagement.avoidFoods.join(', ')}. 
+        Tips: ${kb.morningSicknessManagement.eatingTips.join(', ')}`
+    });
+
+    // Pregnancy timeline
+    Object.entries(kb.pregnancyTimeline).forEach(([key, value]: [string, any]) => {
+      this.sections.push({
+        id: `timeline-${key}`,
+        content: `${value.title} (${value.trimester} trimester): Common symptoms include ${
+          value.commonSymptoms.map((s: any) => `${s.symptom} - ${s.status}`).join(', ')
+        }. Recommended exercise: ${value.exercise?.name} - ${value.exercise?.benefits}`
+      });
+    });
+
+    // Symptoms
+    kb.symptomTroubleshooting.categories.forEach((cat: any) => {
+      cat.symptoms.forEach((symptom: any) => {
+        this.sections.push({
+          id: `symptom-${symptom.sign.toLowerCase().replace(/\s+/g, '-')}`,
+          content: `${symptom.sign} (${cat.category}): ${symptom.action}. Urgency: ${symptom.urgency}. Severity: ${symptom.severity}`
+        });
+      });
+    });
+
+    // Medications
+    kb.medications.byCondition.forEach((condition: any) => {
+      condition.medications.forEach((med: any) => {
+        this.sections.push({
+          id: `medication-${med.drug.toLowerCase()}`,
+          content: `${med.drug} (${med.brand || 'Generic'}) for ${condition.condition}: ${med.safetyLevel}. ${med.note || ''}`
+        });
+      });
+    });
+  }
+
+  private async generateEmbeddings() {
+    if (!this.openai || this.embeddingsGenerated) return;
+
+    try {
+      // Generate embeddings for all sections
+      const embeddingPromises = this.sections.map(async (section) => {
+        const response = await this.openai!.embeddings.create({
+          model: 'text-embedding-ada-002',
+          input: section.content,
+        });
+        section.embedding = response.data[0].embedding;
+      });
+
+      await Promise.all(embeddingPromises);
+      this.embeddingsGenerated = true;
+    } catch (error) {
+      console.error('Failed to generate embeddings:', error);
+    }
+  }
+
+  private cosineSimilarity(a: number[], b: number[]): number {
+    const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
+    const magnitudeA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+    const magnitudeB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+    return dotProduct / (magnitudeA * magnitudeB);
+  }
+
+  async findRelevantSections(query: string, topK: number = 3): Promise<KnowledgeSection[]> {
+    if (!this.openai || !this.embeddingsGenerated) {
+      // Fallback to simple keyword search
+      const queryLower = query.toLowerCase();
+      return this.sections
+        .filter(section => section.content.toLowerCase().includes(queryLower))
+        .slice(0, topK);
+    }
+
+    try {
+      // Generate embedding for the query
+      const response = await this.openai.embeddings.create({
+        model: 'text-embedding-ada-002',
+        input: query,
+      });
+      const queryEmbedding = response.data[0].embedding;
+
+      // Calculate similarities
+      const sectionsWithScores = this.sections
+        .filter(section => section.embedding)
+        .map(section => ({
+          section,
+          score: this.cosineSimilarity(queryEmbedding, section.embedding!)
+        }))
+        .sort((a, b) => b.score - a.score);
+
+      // Return top K sections with score > 0.7
+      return sectionsWithScores
+        .filter(item => item.score > 0.7)
+        .slice(0, topK)
+        .map(item => item.section);
+    } catch (error) {
+      console.error('Failed to find relevant sections:', error);
+      return [];
+    }
+  }
+
+  getKnowledgeBase() {
+    return this.knowledgeBase;
   }
 
   getWeekInfo(week: number): WeekInfo | null {
-    if (week >= 9 && week <= 12) return this.data.pregnancyTimeline.weeks9to12;
-    if (week >= 13 && week <= 16) return this.data.pregnancyTimeline.weeks13to16;
+    if (!this.knowledgeBase) return null;
+    if (week >= 9 && week <= 12) return this.knowledgeBase.pregnancyTimeline.weeks9to12;
+    if (week >= 13 && week <= 16) return this.knowledgeBase.pregnancyTimeline.weeks13to16;
     return null;
   }
 
   checkMedicationSafety(medName: string): Medication[] {
+    if (!this.knowledgeBase) return [];
     const results: Medication[] = [];
-    this.data.medications.byCondition.forEach(condition => {
-      condition.medications.forEach(med => {
+    this.knowledgeBase.medications.byCondition.forEach((condition: any) => {
+      condition.medications.forEach((med: any) => {
         if (med.drug.toLowerCase().includes(medName.toLowerCase()) ||
             (med.brand && med.brand.toLowerCase().includes(medName.toLowerCase()))) {
           results.push({ ...med, condition: condition.condition });
@@ -204,9 +249,10 @@ class PregnancyKnowledgeBase {
   }
 
   getSymptomInfo(symptom: string): Symptom[] {
+    if (!this.knowledgeBase) return [];
     const results: Symptom[] = [];
-    this.data.symptomTroubleshooting.categories.forEach(cat => {
-      cat.symptoms.forEach(s => {
+    this.knowledgeBase.symptomTroubleshooting.categories.forEach((cat: any) => {
+      cat.symptoms.forEach((s: any) => {
         if (s.sign.toLowerCase().includes(symptom.toLowerCase())) {
           results.push({ ...s, category: cat.category });
         }
@@ -216,9 +262,10 @@ class PregnancyKnowledgeBase {
   }
 
   getEmergencySymptoms(): Symptom[] {
+    if (!this.knowledgeBase) return [];
     const emergencies: Symptom[] = [];
-    this.data.symptomTroubleshooting.categories.forEach(cat => {
-      cat.symptoms.forEach(s => {
+    this.knowledgeBase.symptomTroubleshooting.categories.forEach((cat: any) => {
+      cat.symptoms.forEach((s: any) => {
         if (s.severity === 'high') {
           emergencies.push({ ...s, category: cat.category });
         }
@@ -228,155 +275,15 @@ class PregnancyKnowledgeBase {
   }
 
   getNutritionalRequirements() {
-    return this.data.nutritionalRequirements;
-  }
-
-  processChat(input: string): { response: string; exact: boolean } {
-    const lower = input.toLowerCase();
-    let hasAnswer = false;
-    let response = "";
-    
-    // Week queries - more flexible matching
-    const weekMatch = lower.match(/(week|weeks|trimester|month).*?(\d+)/);
-    if (weekMatch) {
-      const week = parseInt(weekMatch[2]);
-      const info = this.getWeekInfo(week);
-      if (info) {
-        hasAnswer = true;
-        response = `### Week ${week} (${info.trimester} Trimester)\n**${info.title}**\n\n**Common symptoms:**\n${
-          info.commonSymptoms.map(s => `- ${s.symptom}: ${s.status}`).join('\n')
-        }`;
-        
-        if (info.exercise) {
-          response += `\n\n**Recommended exercise:** ${info.exercise.name}\n**Benefits:** ${
-            info.exercise.benefits
-          }\n**Instructions:**\n${
-            info.exercise.instructions.map((inst, i) => `${i+1}. ${inst}`).join('\n')
-          }`;
-        }
-      }
-    }
-    
-    // Medication queries - expanded matching
-    const medKeywords = ['medication', 'medicine', 'drug', 'pill', 'safe to take', 'can i take', 'is it safe'];
-    const medMatch = lower.match(new RegExp(`(${medKeywords.join('|')})[\\s\\w]*?(\\w+)`, 'i'));
-    if (medMatch || medKeywords.some(kw => lower.includes(kw))) {
-      let medName = medMatch?.[2] || input.split(/\s+/).pop() || '';
-      if (medName) {
-        const results = this.checkMedicationSafety(medName);
-        if (results.length > 0) {
-          hasAnswer = true;
-          response = results.map(med => 
-            `### ${med.drug}${med.brand ? ` (${med.brand})` : ''}\n` +
-            `**Safety:** ${med.safety} ${med.safetyLevel}\n` +
-            `${med.note ? `**Note:** ${med.note}\n` : ''}` +
-            `**For:** ${med.condition}`
-          ).join('\n\n');
-        }
-      }
-    }
-    
-    // Symptom queries - expanded matching
-    const symptomKeywords = ['symptom', 'sign', 'feel', 'experience', 'having', 'bleeding', 'pain', 'ache', 
-                            'fever', 'headache', 'nausea', 'dizziness', 'discharge', 'cramp'];
-    if (symptomKeywords.some(kw => lower.includes(kw))) {
-      const symptoms = this.getSymptomInfo(lower);
-      if (symptoms.length > 0) {
-        hasAnswer = true;
-        response = symptoms.map(s => 
-          `### ${s.sign}\n` +
-          `**Category:** ${s.category}\n` +
-          `**Urgency:** ${s.urgency}\n` +
-          `**Action:** ${s.action}\n` +
-          `**Severity:** ${s.severity}`
-        ).join('\n\n');
-      }
-    }
-    
-    // Nutrition queries - expanded matching
-    const nutritionKeywords = ['nutrition', 'nutrient', 'vitamin', 'mineral', 'diet', 'eat', 'food', 
-                              'meal', 'intake', 'requirement', 'macro'];
-    if (nutritionKeywords.some(kw => lower.includes(kw))) {
-      hasAnswer = true;
-      const nutrients = this.data.nutritionalRequirements.dailyMacros;
-      response = `### Daily Nutritional Requirements\n${
-        nutrients.map(n => `- **${n.nutrient}:** ${n.amount} ${n.unit} (${n.category})`).join('\n')
-      }`;
-      
-      // Add weight gain info if query mentions weight
-      if (lower.includes('weight') || lower.includes('gain') || lower.includes('bmi')) {
-        const weightInfo = this.data.nutritionalRequirements.weightGainRecommendations;
-        response += `\n\n### Recommended Weight Gain\n${
-          weightInfo.map(w => 
-            `- **${w.prePregnancyBMI}** (BMI ${w.bmiRange}): ${w.recommendedGain} ${w.unit}`
-          ).join('\n')
-        }`;
-      }
-    }
-    
-    // Food safety queries
-    if (lower.includes('food safety') || lower.includes('avoid') || lower.includes('unsafe')) {
-      hasAnswer = true;
-      const unsafeSeafood = this.data.foodSafety.seafoodGuidelines.unsafe.join(', ');
-      const avoidFoods = this.data.foodSafety.avoidFoods.map(f => 
-        `- ${f.item}${f.includes ? ` (includes ${f.includes.join(', ')})` : ''}`
-      ).join('\n');
-      
-      response = `### Foods to Avoid\n**Unsafe Seafood (High Mercury):** ${unsafeSeafood}\n\n**Other Foods to Avoid:**\n${avoidFoods}`;
-    }
-    
-    // Morning sickness queries
-    if (lower.includes('morning sickness') || lower.includes('nausea')) {
-      hasAnswer = true;
-      const tips = this.data.morningSicknessManagement;
-      response = `### Managing Morning Sickness\n**What to eat:** ${tips.whatToEat.join(', ')}\n\n` +
-                 `**Avoid:** ${tips.avoidFoods.join(', ')}\n\n` +
-                 `**Eating Tips:**\n${tips.eatingTips.map(t => `- ${t}`).join('\n')}\n\n` +
-                 `**Hydration Tips:**\n${tips.hydrationTips.map(t => `- ${t}`).join('\n')}`;
-    }
-    
-    // Emergency symptom queries
-    if (lower.includes('emergency') || lower.includes('urgent') || lower.includes('immediately')) {
-      const emergencies = this.getEmergencySymptoms();
-      if (emergencies.length > 0) {
-        hasAnswer = true;
-        response = `### Emergency Symptoms\n${
-          emergencies.map(e => 
-            `- **${e.sign}** (${e.category}): Seek help ${e.urgency} - ${e.action}`
-          ).join('\n')
-        }`;
-      }
-    }
-    
-    if (!hasAnswer) {
-      // Try a more general search before giving up
-      const generalSymptomResults = this.getSymptomInfo(input);
-      if (generalSymptomResults.length > 0) {
-        hasAnswer = true;
-        response = `I found these symptoms that might relate to your question:\n${
-          generalSymptomResults.map(s => `- ${s.sign}: ${s.action} (${s.urgency})`).join('\n')
-        }`;
-      }
-      
-      const generalMedResults = this.checkMedicationSafety(input);
-      if (generalMedResults.length > 0) {
-        hasAnswer = true;
-        response = `I found these medications that might relate to your question:\n${
-          generalMedResults.map(m => `- ${m.drug}: ${m.safetyLevel}`).join('\n')
-        }`;
-      }
-    }
-    
-    if (!hasAnswer) {
-      return { response: "NO_KB_ANSWER", exact: false };
-    }
-    return { response, exact: true };
+    if (!this.knowledgeBase) return { dailyMacros: [], weightGainRecommendations: [] };
+    return this.knowledgeBase.nutritionalRequirements;
   }
 }
 
 // ==================== MAIN APP COMPONENT ====================
 const PregnancyTrackerApp: React.FC = () => {
-  const [kb] = useState(() => new PregnancyKnowledgeBase(knowledgeGraph));
+  const [kb] = useState(() => new KnowledgeBaseService());
+  const [isKbLoaded, setIsKbLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [dueDate, setDueDate] = useState<string>(() => {
     const saved = localStorage.getItem('pregnancyDueDate');
@@ -392,7 +299,7 @@ const PregnancyTrackerApp: React.FC = () => {
     if (!saved) return 12;
     const today = new Date();
     const due = new Date(saved);
-    const diffTime = due - today;
+    const diffTime = due.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     const weeksRemaining = Math.floor(diffDays / 7);
     return Math.max(1, Math.min(40, 40 - weeksRemaining));
@@ -402,13 +309,20 @@ const PregnancyTrackerApp: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<Message[]>([
     { 
       role: 'assistant', 
-      content: 'Hello! I\'m your pregnancy assistant. Ask me about symptoms, medications, nutrition, or anything pregnancy-related!',
+      content: 'Hello! I\'m your pregnancy assistant powered by OpenAI. Ask me about symptoms, medications, nutrition, or anything pregnancy-related!',
       source: 'knowledge-base'
     }
   ]);
   const [chatInput, setChatInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Initialize knowledge base
+    kb.initialize().then(() => {
+      setIsKbLoaded(true);
+    });
+  }, [kb]);
 
   useEffect(() => {
     console.log('Modal version changed:', modalVersion, 'showModal:', showDueDateModal);
@@ -422,7 +336,7 @@ const PregnancyTrackerApp: React.FC = () => {
     if (dueDate) {
       const today = new Date();
       const due = new Date(dueDate);
-      const diffTime = due - today;
+      const diffTime = due.getTime() - today.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       const weeksRemaining = Math.floor(diffDays / 7);
       const calculatedWeek = Math.max(1, Math.min(40, 40 - weeksRemaining));
@@ -433,7 +347,7 @@ const PregnancyTrackerApp: React.FC = () => {
   const handleDueDateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
-    const inputDate = form.dueDate.value;
+    const inputDate = (form.elements.namedItem('dueDate') as HTMLInputElement).value;
     if (inputDate) {
       setDueDate(inputDate);
       localStorage.setItem('pregnancyDueDate', inputDate);
@@ -445,41 +359,6 @@ const PregnancyTrackerApp: React.FC = () => {
   const emergencySymptoms = kb.getEmergencySymptoms();
   const nutritionalReqs = kb.getNutritionalRequirements();
 
-  const queryLLM = async (userQuery: string, knowledgeBaseResponse: string): Promise<string> => {
-    try {
-      const prompt = `You are a pregnancy care assistant. The user asked: "${userQuery}".\n\n${
-        knowledgeBaseResponse === "NO_KB_ANSWER" 
-          ? "This information is not in our knowledge base."
-          : `Our knowledge base says:\n${knowledgeBaseResponse}`
-      }\n\nPlease provide a helpful response and clearly state if you're giving general advice not from our verified sources.`;
-
-      const response = await axios.post(
-        'https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill',
-        { inputs: { text: prompt } },
-        {
-          headers: {
-            'Authorization': `Bearer ${process.env.REACT_APP_HF_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      let generatedText = response.data.generated_text || "I couldn't generate a response right now.";
-      
-      // Add disclaimer if outside knowledge base
-      if (knowledgeBaseResponse === "NO_KB_ANSWER") {
-        generatedText += "\n\n[Note: This is general advice not verified by our medical team. Please consult your healthcare provider.]";
-      }
-
-      return generatedText;
-    } catch (error) {
-      console.error("LLM API error:", error);
-      return knowledgeBaseResponse === "NO_KB_ANSWER"
-        ? "I couldn't find information about that in our knowledge base. [This is general advice - consult your healthcare provider.]"
-        : knowledgeBaseResponse;
-    }
-  };
-
   const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || isLoading) return;
@@ -490,21 +369,61 @@ const PregnancyTrackerApp: React.FC = () => {
     setIsLoading(true);
     
     try {
-      const kbResult = kb.processChat(chatInput);
+      // Find relevant knowledge base sections
+      const relevantSections = await kb.findRelevantSections(chatInput, 3);
       
       let assistantMessage: Message;
-      if (kbResult.exact) {
+      
+      if (!import.meta.env.VITE_OPENAI_API_KEY) {
+        // Fallback if no API key
         assistantMessage = {
           role: 'assistant',
-          content: `${kbResult.response}\n\n[Verified information from our pregnancy knowledge base]`,
-          source: 'knowledge-base'
+          content: "OpenAI API key not configured. Please set VITE_OPENAI_API_KEY in your environment variables.",
+          source: 'error'
         };
       } else {
-        const llmResponse = await queryLLM(chatInput, kbResult.response);
+        // Prepare context from knowledge base
+        const kbContext = relevantSections.length > 0 
+          ? `Based on our pregnancy knowledge base:\n${relevantSections.map(s => s.content).join('\n\n')}`
+          : '';
+
+        // Call OpenAI
+        const openai = new OpenAI({
+          apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+          dangerouslyAllowBrowser: true
+        });
+
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: `You are a helpful pregnancy care assistant. You have access to a medical knowledge base about pregnancy. 
+                When answering questions, clearly indicate whether your response is based on the provided knowledge base or general knowledge.
+                Always recommend consulting healthcare providers for medical decisions.
+                ${kbContext ? `\n\nRelevant information from knowledge base:\n${kbContext}` : ''}`
+            },
+            {
+              role: 'user',
+              content: chatInput
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 500
+        });
+
+        const responseContent = completion.choices[0].message.content || 'I couldn\'t generate a response.';
+        
+        // Determine if response used knowledge base
+        const usedKnowledgeBase = relevantSections.length > 0 && 
+          relevantSections.some(section => 
+            responseContent.toLowerCase().includes(section.content.toLowerCase().slice(0, 30))
+          );
+
         assistantMessage = {
           role: 'assistant',
-          content: llmResponse,
-          source: 'ai-general'
+          content: responseContent,
+          source: usedKnowledgeBase ? 'knowledge-base' : 'ai-general'
         };
       }
       
@@ -548,6 +467,12 @@ const PregnancyTrackerApp: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {!isKbLoaded && (
+        <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200">
+          <p className="text-sm text-yellow-800">Loading pregnancy knowledge base...</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <button
@@ -678,6 +603,7 @@ const PregnancyTrackerApp: React.FC = () => {
 
   const renderMedications = () => {
     const searchResults = medicationSearch ? kb.checkMedicationSafety(medicationSearch) : [];
+    const knowledgeBase = kb.getKnowledgeBase();
     
     return (
       <div className="space-y-6">
@@ -724,22 +650,24 @@ const PregnancyTrackerApp: React.FC = () => {
             </div>
           )}
 
-          <div className="mt-8">
-            <h3 className="font-semibold mb-3">Common Medications by Category</h3>
-            {knowledgeGraph.pregnancyKnowledgeGraph.medications.byCondition.map((cat, i) => (
-              <div key={i} className="mb-4">
-                <h4 className="font-medium text-gray-700 mb-2">{cat.condition}</h4>
-                <div className="grid grid-cols-1 gap-2">
-                  {cat.medications.map((med, j) => (
-                    <div key={j} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                      <span className="text-sm">{med.drug} ({med.brand})</span>
-                      <span className="text-xl">{med.safety}</span>
-                    </div>
-                  ))}
+          {knowledgeBase && (
+            <div className="mt-8">
+              <h3 className="font-semibold mb-3">Common Medications by Category</h3>
+              {knowledgeBase.medications.byCondition.map((cat: any, i: number) => (
+                <div key={i} className="mb-4">
+                  <h4 className="font-medium text-gray-700 mb-2">{cat.condition}</h4>
+                  <div className="grid grid-cols-1 gap-2">
+                    {cat.medications.map((med: any, j: number) => (
+                      <div key={j} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <span className="text-sm">{med.drug} ({med.brand})</span>
+                        <span className="text-xl">{med.safety}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -747,6 +675,7 @@ const PregnancyTrackerApp: React.FC = () => {
 
   const renderSymptoms = () => {
     const symptomResults = symptomSearch ? kb.getSymptomInfo(symptomSearch) : [];
+    const knowledgeBase = kb.getKnowledgeBase();
     
     return (
       <div className="space-y-6">
@@ -787,105 +716,115 @@ const PregnancyTrackerApp: React.FC = () => {
             </div>
           )}
 
-          <div>
-            <h3 className="font-semibold mb-3">All Symptoms by Category</h3>
-            {knowledgeGraph.pregnancyKnowledgeGraph.symptomTroubleshooting.categories.map((cat, i) => (
-              <div key={i} className="mb-6">
-                <h4 className="font-medium text-gray-700 mb-2">{cat.category}</h4>
-                <div className="space-y-2">
-                  {cat.symptoms.map((symptom, j) => (
-                    <div key={j} className="flex items-start p-3 bg-gray-50 rounded-lg">
-                      <div className={`w-2 h-2 rounded-full mt-1.5 mr-3 ${
-                        symptom.severity === 'high' ? 'bg-red-500' :
-                        symptom.severity === 'medium' ? 'bg-yellow-500' :
-                        'bg-green-500'
-                      }`} />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">{symptom.sign}</p>
-                        <p className="text-xs text-gray-600">{symptom.action} • {symptom.urgency}</p>
+          {knowledgeBase && (
+            <div>
+              <h3 className="font-semibold mb-3">All Symptoms by Category</h3>
+              {knowledgeBase.symptomTroubleshooting.categories.map((cat: any, i: number) => (
+                <div key={i} className="mb-6">
+                  <h4 className="font-medium text-gray-700 mb-2">{cat.category}</h4>
+                  <div className="space-y-2">
+                    {cat.symptoms.map((symptom: any, j: number) => (
+                      <div key={j} className="flex items-start p-3 bg-gray-50 rounded-lg">
+                        <div className={`w-2 h-2 rounded-full mt-1.5 mr-3 ${
+                          symptom.severity === 'high' ? 'bg-red-500' :
+                          symptom.severity === 'medium' ? 'bg-yellow-500' :
+                          'bg-green-500'
+                        }`} />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{symptom.sign}</p>
+                          <p className="text-xs text-gray-600">{symptom.action} • {symptom.urgency}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
   };
 
-  const renderNutrition = () => (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-xl shadow-md">
-        <h2 className="text-2xl font-bold mb-4">Nutrition Planner</h2>
-        
-        <div className="mb-6">
-          <h3 className="font-semibold mb-3">Daily Nutritional Requirements</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {nutritionalReqs.dailyMacros.map((nutrient, i) => (
-              <div key={i} className="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="font-semibold">{nutrient.nutrient}</h4>
-                    <p className="text-sm text-gray-600 capitalize">{nutrient.category}</p>
+  const renderNutrition = () => {
+    const knowledgeBase = kb.getKnowledgeBase();
+    
+    return (
+      <div className="space-y-6">
+        <div className="bg-white p-6 rounded-xl shadow-md">
+          <h2 className="text-2xl font-bold mb-4">Nutrition Planner</h2>
+          
+          <div className="mb-6">
+            <h3 className="font-semibold mb-3">Daily Nutritional Requirements</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {nutritionalReqs.dailyMacros.map((nutrient, i) => (
+                <div key={i} className="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h4 className="font-semibold">{nutrient.nutrient}</h4>
+                      <p className="text-sm text-gray-600 capitalize">{nutrient.category}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-purple-600">{nutrient.amount}</p>
+                      <p className="text-sm text-gray-600">{nutrient.unit}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-purple-600">{nutrient.amount}</p>
-                    <p className="text-sm text-gray-600">{nutrient.unit}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-red-50 p-4 rounded-lg mb-6">
-          <h3 className="font-semibold text-red-900 mb-2">Foods to Avoid</h3>
-          <div className="space-y-3">
-            <div>
-              <h4 className="font-medium text-red-800 mb-1">Unsafe Seafood (High Mercury)</h4>
-              <p className="text-sm text-red-700">
-                {knowledgeGraph.pregnancyKnowledgeGraph.foodSafety.seafoodGuidelines.unsafe.join(', ')}
-              </p>
-            </div>
-            <div className="space-y-2">
-              {knowledgeGraph.pregnancyKnowledgeGraph.foodSafety.avoidFoods.map((food, i) => (
-                <div key={i} className="text-sm">
-                  <span className="font-medium text-red-800">{food.item}</span>
-                  {food.includes && (
-                    <span className="text-red-700"> - includes {food.includes.join(', ')}</span>
-                  )}
                 </div>
               ))}
             </div>
           </div>
-        </div>
 
-        <div className="bg-green-50 p-4 rounded-lg">
-          <h3 className="font-semibold text-green-900 mb-2">Morning Sickness Tips</h3>
-          <div className="space-y-2 text-sm">
-            <div>
-              <p className="font-medium text-green-800">What to Eat:</p>
-              <p className="text-green-700">{knowledgeGraph.pregnancyKnowledgeGraph.morningSicknessManagement.whatToEat.join(', ')}</p>
-            </div>
-            <div>
-              <p className="font-medium text-green-800">Foods to Avoid:</p>
-              <p className="text-green-700">{knowledgeGraph.pregnancyKnowledgeGraph.morningSicknessManagement.avoidFoods.join(', ')}</p>
-            </div>
-            <div>
-              <p className="font-medium text-green-800">Eating Tips:</p>
-              <ul className="text-green-700 ml-4">
-                {knowledgeGraph.pregnancyKnowledgeGraph.morningSicknessManagement.eatingTips.map((tip, i) => (
-                  <li key={i} className="list-disc">{tip}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          {knowledgeBase && (
+            <>
+              <div className="bg-red-50 p-4 rounded-lg mb-6">
+                <h3 className="font-semibold text-red-900 mb-2">Foods to Avoid</h3>
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="font-medium text-red-800 mb-1">Unsafe Seafood (High Mercury)</h4>
+                    <p className="text-sm text-red-700">
+                      {knowledgeBase.foodSafety.seafoodGuidelines.unsafe.join(', ')}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {knowledgeBase.foodSafety.avoidFoods.map((food: any, i: number) => (
+                      <div key={i} className="text-sm">
+                        <span className="font-medium text-red-800">{food.item}</span>
+                        {food.includes && (
+                          <span className="text-red-700"> - includes {food.includes.join(', ')}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-green-50 p-4 rounded-lg">
+                <h3 className="font-semibold text-green-900 mb-2">Morning Sickness Tips</h3>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <p className="font-medium text-green-800">What to Eat:</p>
+                    <p className="text-green-700">{knowledgeBase.morningSicknessManagement.whatToEat.join(', ')}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-green-800">Foods to Avoid:</p>
+                    <p className="text-green-700">{knowledgeBase.morningSicknessManagement.avoidFoods.join(', ')}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-green-800">Eating Tips:</p>
+                    <ul className="text-green-700 ml-4">
+                      {knowledgeBase.morningSicknessManagement.eatingTips.map((tip: string, i: number) => (
+                        <li key={i} className="list-disc">{tip}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderEmergency = () => (
     <div className="space-y-6">
@@ -939,7 +878,7 @@ const PregnancyTrackerApp: React.FC = () => {
           <MessageCircle className="w-6 h-6 mr-2" />
           Pregnancy Assistant
         </h2>
-        <p className="text-xs text-gray-500 mt-1">Powered by Hugging Face AI</p>
+        <p className="text-xs text-gray-500 mt-1">Powered by OpenAI GPT-3.5</p>
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -954,7 +893,7 @@ const PregnancyTrackerApp: React.FC = () => {
               {msg.source === 'knowledge-base' && (
                 <p className="text-xs mt-2 text-green-600 flex items-center">
                   <CheckCircle className="w-3 h-3 mr-1" />
-                  Verified medical information
+                  Based on verified medical information
                 </p>
               )}
               {msg.source === 'ai-general' && (
@@ -999,7 +938,7 @@ const PregnancyTrackerApp: React.FC = () => {
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-2">
-          Free AI service may have limited responses. For complex questions, consult your healthcare provider.
+          AI responses use your pregnancy knowledge base when relevant. Always consult your healthcare provider.
         </p>
       </form>
     </div>
