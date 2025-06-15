@@ -249,6 +249,11 @@ export default function PregnancyTrackerApp() {
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
 
+  // Debug state changes
+  useEffect(() => {
+    console.log('Modal state changed:', showDueDateModal);
+  }, [showDueDateModal]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
