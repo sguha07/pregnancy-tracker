@@ -229,10 +229,8 @@ export default function PregnancyTrackerApp() {
   const [activeTab, setActiveTab] = useState('home');
   const [dueDate, setDueDate] = useState(() => {
     const saved = localStorage.getItem('pregnancyDueDate');
-    console.log('Loaded due date from storage:', saved);
-    return saved || '';
+    return saved ? saved : '';
   });
-  // Use a number to force re-renders: 0 = closed, 1+ = open
   const [modalVersion, setModalVersion] = useState(() => {
     const saved = localStorage.getItem('pregnancyDueDate');
     return (!saved || saved === '') ? 1 : 0;
@@ -257,7 +255,6 @@ export default function PregnancyTrackerApp() {
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef(null);
 
-  // Debug state changes
   useEffect(() => {
     console.log('Modal version changed:', modalVersion, 'showModal:', showDueDateModal);
   }, [modalVersion, showDueDateModal]);
@@ -285,6 +282,15 @@ export default function PregnancyTrackerApp() {
       setDueDate(inputDate);
       localStorage.setItem('pregnancyDueDate', inputDate);
       setModalVersion(0);
+      
+      // Calculate and update the current week
+      const today = new Date();
+      const due = new Date(inputDate);
+      const diffTime = due - today;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const weeksRemaining = Math.floor(diffDays / 7);
+      const calculatedWeek = Math.max(1, Math.min(40, 40 - weeksRemaining));
+      setCurrentWeek(calculatedWeek);
     }
   };
 
@@ -323,11 +329,7 @@ export default function PregnancyTrackerApp() {
             </div>
           </div>
           <button
-            onClick={() => {
-              console.log('Update due date clicked');
-              console.log('Current modal version:', modalVersion);
-              setModalVersion(prev => prev + 1);
-            }}
+            onClick={() => setModalVersion(prev => prev + 1)}
             className="px-3 py-1 text-sm text-purple-600 hover:text-purple-800 underline cursor-pointer"
             type="button"
           >
@@ -790,6 +792,43 @@ export default function PregnancyTrackerApp() {
           )}
         </div>
 
+        {/* Due Date Modal */}
+        {showDueDateModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-xl max-w-md w-full">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold">Update Due Date</h3>
+                <button 
+                  onClick={() => setModalVersion(0)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <form onSubmit={handleDueDateSubmit}>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Enter your due date:
+                  </label>
+                  <input
+                    type="date"
+                    name="dueDate"
+                    required
+                    className="w-full p-2 border rounded-lg"
+                    min={new Date().toISOString().split('T')[0]} // Prevent past dates
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700"
+                >
+                  Save Due Date
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* Bottom Navigation */}
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg">
           <div className="max-w-4xl mx-auto px-4">
@@ -849,5 +888,4 @@ export default function PregnancyTrackerApp() {
       </div>
     </div>
   );
-
 }
