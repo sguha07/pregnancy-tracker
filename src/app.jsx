@@ -229,13 +229,21 @@ export default function PregnancyTrackerApp() {
   const [activeTab, setActiveTab] = useState('home');
   const [dueDate, setDueDate] = useState(() => {
     const saved = localStorage.getItem('pregnancyDueDate');
+    console.log('Loaded due date from storage:', saved);
     return saved || '';
   });
-  const [showDueDateModal, setShowDueDateModal] = useState(!dueDate);
+  // Use a number to force re-renders: 0 = closed, 1+ = open
+  const [modalVersion, setModalVersion] = useState(() => {
+    const saved = localStorage.getItem('pregnancyDueDate');
+    return (!saved || saved === '') ? 1 : 0;
+  });
+  const showDueDateModal = modalVersion > 0;
+  
   const [currentWeek, setCurrentWeek] = useState(() => {
-    if (!dueDate) return 12;
+    const saved = localStorage.getItem('pregnancyDueDate');
+    if (!saved) return 12;
     const today = new Date();
-    const due = new Date(dueDate);
+    const due = new Date(saved);
     const diffTime = due - today;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     const weeksRemaining = Math.floor(diffDays / 7);
@@ -251,8 +259,8 @@ export default function PregnancyTrackerApp() {
 
   // Debug state changes
   useEffect(() => {
-    console.log('Modal state changed:', showDueDateModal);
-  }, [showDueDateModal]);
+    console.log('Modal version changed:', modalVersion, 'showModal:', showDueDateModal);
+  }, [modalVersion, showDueDateModal]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -276,7 +284,7 @@ export default function PregnancyTrackerApp() {
     if (inputDate) {
       setDueDate(inputDate);
       localStorage.setItem('pregnancyDueDate', inputDate);
-      setShowDueDateModal(false);
+      setModalVersion(0);
     }
   };
 
@@ -317,7 +325,8 @@ export default function PregnancyTrackerApp() {
           <button
             onClick={() => {
               console.log('Update due date clicked');
-              setShowDueDateModal(true);
+              console.log('Current modal version:', modalVersion);
+              setModalVersion(prev => prev + 1);
             }}
             className="px-3 py-1 text-sm text-purple-600 hover:text-purple-800 underline cursor-pointer"
             type="button"
