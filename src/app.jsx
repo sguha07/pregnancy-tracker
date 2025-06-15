@@ -1,7 +1,57 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, Pill, AlertCircle, Apple, MessageCircle, Home, Baby, ChevronRight, Send, X, Search, Heart, Activity, FileText, AlertTriangle, CheckCircle } from 'lucide-react';
+import axios from 'axios';
 
-// Knowledge Graph Data
+// ==================== TYPES ====================
+type Nutrient = {
+  nutrient: string;
+  amount: string;
+  unit: string;
+  category: string;
+};
+
+type WeightGainRecommendation = {
+  prePregnancyBMI: string;
+  bmiRange: string;
+  recommendedGain: string;
+  unit: string;
+};
+
+type Symptom = {
+  sign: string;
+  urgency: string;
+  action: string;
+  severity: 'low' | 'medium' | 'high';
+};
+
+type Medication = {
+  drug: string;
+  brand?: string;
+  safety: string;
+  safetyLevel: string;
+  note?: string;
+};
+
+type WeekInfo = {
+  trimester: string;
+  title: string;
+  commonSymptoms: Array<{ symptom: string; status: string }>;
+  exercise?: {
+    name: string;
+    benefits: string;
+    instructions: string[];
+  };
+};
+
+type Message = {
+  role: 'user' | 'assistant';
+  content: string;
+  source?: 'knowledge-base' | 'ai-general' | 'error';
+};
+
+type Tab = 'home' | 'tracker' | 'medications' | 'symptoms' | 'nutrition' | 'emergency' | 'chat';
+
+// ==================== KNOWLEDGE GRAPH ====================
 const knowledgeGraph = {
   pregnancyKnowledgeGraph: {
     nutritionalRequirements: {
@@ -11,13 +61,13 @@ const knowledgeGraph = {
         { nutrient: "Protein", amount: "88", unit: "gm", category: "macronutrient" },
         { nutrient: "Iron", amount: "27", unit: "mg", category: "mineral" },
         { nutrient: "Vitamin D", amount: "600", unit: "IUs", category: "vitamin" }
-      ],
+      ] as Nutrient[],
       weightGainRecommendations: [
         { prePregnancyBMI: "Underweight", bmiRange: "<18.5", recommendedGain: "28-40", unit: "pounds" },
         { prePregnancyBMI: "Healthy weight", bmiRange: "18.5-24.9", recommendedGain: "25-35", unit: "pounds" },
         { prePregnancyBMI: "Overweight", bmiRange: "25-29.9", recommendedGain: "15-25", unit: "pounds" },
         { prePregnancyBMI: "Obese", bmiRange: "≥30", recommendedGain: "11-20", unit: "pounds" }
-      ]
+      ] as WeightGainRecommendation[]
     },
     foodSafety: {
       seafoodGuidelines: {
@@ -126,20 +176,22 @@ const knowledgeGraph = {
   }
 };
 
-// Knowledge Base Class
+// ==================== KNOWLEDGE BASE CLASS ====================
 class PregnancyKnowledgeBase {
-  constructor(data) {
+  private data: typeof knowledgeGraph.pregnancyKnowledgeGraph;
+
+  constructor(data: typeof knowledgeGraph) {
     this.data = data.pregnancyKnowledgeGraph;
   }
 
-  getWeekInfo(week) {
+  getWeekInfo(week: number): WeekInfo | null {
     if (week >= 9 && week <= 12) return this.data.pregnancyTimeline.weeks9to12;
     if (week >= 13 && week <= 16) return this.data.pregnancyTimeline.weeks13to16;
     return null;
   }
 
-  checkMedicationSafety(medName) {
-    const results = [];
+  checkMedicationSafety(medName: string): Medication[] {
+    const results: Medication[] = [];
     this.data.medications.byCondition.forEach(condition => {
       condition.medications.forEach(med => {
         if (med.drug.toLowerCase().includes(medName.toLowerCase()) ||
@@ -151,8 +203,8 @@ class PregnancyKnowledgeBase {
     return results;
   }
 
-  getSymptomInfo(symptom) {
-    const results = [];
+  getSymptomInfo(symptom: string): Symptom[] {
+    const results: Symptom[] = [];
     this.data.symptomTroubleshooting.categories.forEach(cat => {
       cat.symptoms.forEach(s => {
         if (s.sign.toLowerCase().includes(symptom.toLowerCase())) {
@@ -163,8 +215,8 @@ class PregnancyKnowledgeBase {
     return results;
   }
 
-  getEmergencySymptoms() {
-    const emergencies = [];
+  getEmergencySymptoms(): Symptom[] {
+    const emergencies: Symptom[] = [];
     this.data.symptomTroubleshooting.categories.forEach(cat => {
       cat.symptoms.forEach(s => {
         if (s.severity === 'high') {
@@ -179,8 +231,10 @@ class PregnancyKnowledgeBase {
     return this.data.nutritionalRequirements;
   }
 
-  processChat(input) {
+  processChat(input: string): { response: string; exact: boolean } {
     const lower = input.toLowerCase();
+    let hasAnswer = false;
+    let response = "";
     
     // Week queries
     const weekMatch = lower.match(/week\s*(\d+)/);
@@ -188,7 +242,8 @@ class PregnancyKnowledgeBase {
       const week = parseInt(weekMatch[1]);
       const info = this.getWeekInfo(week);
       if (info) {
-        return `Week ${week} (${info.trimester} Trimester): ${info.title}\n\nCommon symptoms:\n${info.commonSymptoms.map(s => `• ${s.symptom}: ${s.status}`).join('\n')}`;
+        hasAnswer = true;
+        response = `Week ${week} (${info.trimester} Trimester): ${info.title}\n\nCommon symptoms:\n${info.commonSymptoms.map(s => `• ${s.symptom}: ${s.status}`).join('\n')}`;
       }
     }
     
@@ -198,8 +253,9 @@ class PregnancyKnowledgeBase {
       if (medMatch) {
         const results = this.checkMedicationSafety(medMatch[1]);
         if (results.length > 0) {
+          hasAnswer = true;
           const med = results[0];
-          return `${med.drug} (${med.brand}): ${med.safetyLevel} ${med.safety}\n${med.note ? `Note: ${med.note}` : ''}`;
+          response = `${med.drug} (${med.brand}): ${med.safetyLevel} ${med.safety}\n${med.note ? `Note: ${med.note}` : ''}`;
         }
       }
     }
@@ -208,36 +264,40 @@ class PregnancyKnowledgeBase {
     if (lower.includes('bleeding') || lower.includes('pain') || lower.includes('fever')) {
       const symptoms = this.getSymptomInfo(lower);
       if (symptoms.length > 0) {
+        hasAnswer = true;
         const s = symptoms[0];
-        return `${s.sign}:\n• Action: ${s.action}\n• Contact provider: ${s.urgency}\n• Category: ${s.category}`;
+        response = `${s.sign}:\n• Action: ${s.action}\n• Contact provider: ${s.urgency}\n• Category: ${s.category}`;
       }
     }
     
     // Nutrition queries
     if (lower.includes('nutrition') || lower.includes('vitamin') || lower.includes('diet')) {
+      hasAnswer = true;
       const nutrients = this.data.nutritionalRequirements.dailyMacros;
-      return `Daily Nutritional Requirements:\n${nutrients.map(n => `• ${n.nutrient}: ${n.amount} ${n.unit}`).join('\n')}`;
+      response = `Daily Nutritional Requirements:\n${nutrients.map(n => `• ${n.nutrient}: ${n.amount} ${n.unit}`).join('\n')}`;
     }
     
-    return "I can help with pregnancy questions about weeks, symptoms, medications, and nutrition. Try asking about specific weeks (e.g., 'week 12'), medications (e.g., 'can I take Tylenol'), or symptoms.";
+    if (!hasAnswer) {
+      return { response: "NO_KB_ANSWER", exact: false };
+    }
+    return { response, exact: true };
   }
 }
 
-// Main App Component
-export default function PregnancyTrackerApp() {
+// ==================== MAIN APP COMPONENT ====================
+const PregnancyTrackerApp: React.FC = () => {
   const [kb] = useState(() => new PregnancyKnowledgeBase(knowledgeGraph));
-  const [activeTab, setActiveTab] = useState('home');
-  const [dueDate, setDueDate] = useState(() => {
+  const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [dueDate, setDueDate] = useState<string>(() => {
     const saved = localStorage.getItem('pregnancyDueDate');
     return saved ? saved : '';
   });
-  const [modalVersion, setModalVersion] = useState(() => {
+  const [modalVersion, setModalVersion] = useState<number>(() => {
     const saved = localStorage.getItem('pregnancyDueDate');
     return (!saved || saved === '') ? 1 : 0;
   });
   const showDueDateModal = modalVersion > 0;
-  
-  const [currentWeek, setCurrentWeek] = useState(() => {
+  const [currentWeek, setCurrentWeek] = useState<number>(() => {
     const saved = localStorage.getItem('pregnancyDueDate');
     if (!saved) return 12;
     const today = new Date();
@@ -247,13 +307,18 @@ export default function PregnancyTrackerApp() {
     const weeksRemaining = Math.floor(diffDays / 7);
     return Math.max(1, Math.min(40, 40 - weeksRemaining));
   });
-  const [medicationSearch, setMedicationSearch] = useState('');
-  const [symptomSearch, setSymptomSearch] = useState('');
-  const [chatMessages, setChatMessages] = useState([
-    { role: 'assistant', content: 'Hello! I\'m your pregnancy assistant. Ask me about symptoms, medications, nutrition, or anything pregnancy-related!' }
+  const [medicationSearch, setMedicationSearch] = useState<string>('');
+  const [symptomSearch, setSymptomSearch] = useState<string>('');
+  const [chatMessages, setChatMessages] = useState<Message[]>([
+    { 
+      role: 'assistant', 
+      content: 'Hello! I\'m your pregnancy assistant. Ask me about symptoms, medications, nutrition, or anything pregnancy-related!',
+      source: 'knowledge-base'
+    }
   ]);
-  const [chatInput, setChatInput] = useState('');
-  const chatEndRef = useRef(null);
+  const [chatInput, setChatInput] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     console.log('Modal version changed:', modalVersion, 'showModal:', showDueDateModal);
@@ -275,22 +340,14 @@ export default function PregnancyTrackerApp() {
     }
   }, [dueDate]);
 
-  const handleDueDateSubmit = (e) => {
+  const handleDueDateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const inputDate = e.target.dueDate.value;
+    const form = e.target as HTMLFormElement;
+    const inputDate = form.dueDate.value;
     if (inputDate) {
       setDueDate(inputDate);
       localStorage.setItem('pregnancyDueDate', inputDate);
       setModalVersion(0);
-      
-      // Calculate and update the current week
-      const today = new Date();
-      const due = new Date(inputDate);
-      const diffTime = due - today;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      const weeksRemaining = Math.floor(diffDays / 7);
-      const calculatedWeek = Math.max(1, Math.min(40, 40 - weeksRemaining));
-      setCurrentWeek(calculatedWeek);
     }
   };
 
@@ -298,16 +355,80 @@ export default function PregnancyTrackerApp() {
   const emergencySymptoms = kb.getEmergencySymptoms();
   const nutritionalReqs = kb.getNutritionalRequirements();
 
-  const handleChatSubmit = (e) => {
+  const queryLLM = async (userQuery: string, knowledgeBaseResponse: string): Promise<string> => {
+    try {
+      const prompt = `You are a pregnancy care assistant. The user asked: "${userQuery}".\n\n${
+        knowledgeBaseResponse === "NO_KB_ANSWER" 
+          ? "This information is not in our knowledge base."
+          : `Our knowledge base says:\n${knowledgeBaseResponse}`
+      }\n\nPlease provide a helpful response and clearly state if you're giving general advice not from our verified sources.`;
+
+      const response = await axios.post(
+        'https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill',
+        { inputs: { text: prompt } },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.REACT_APP_HF_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      let generatedText = response.data.generated_text || "I couldn't generate a response right now.";
+      
+      // Add disclaimer if outside knowledge base
+      if (knowledgeBaseResponse === "NO_KB_ANSWER") {
+        generatedText += "\n\n[Note: This is general advice not verified by our medical team. Please consult your healthcare provider.]";
+      }
+
+      return generatedText;
+    } catch (error) {
+      console.error("LLM API error:", error);
+      return knowledgeBaseResponse === "NO_KB_ANSWER"
+        ? "I couldn't find information about that in our knowledge base. [This is general advice - consult your healthcare provider.]"
+        : knowledgeBaseResponse;
+    }
+  };
+
+  const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || isLoading) return;
     
-    const userMessage = { role: 'user', content: chatInput };
-    const response = kb.processChat(chatInput);
-    const assistantMessage = { role: 'assistant', content: response };
-    
-    setChatMessages(prev => [...prev, userMessage, assistantMessage]);
+    const userMessage: Message = { role: 'user', content: chatInput };
+    setChatMessages(prev => [...prev, userMessage]);
     setChatInput('');
+    setIsLoading(true);
+    
+    try {
+      const kbResult = kb.processChat(chatInput);
+      
+      let assistantMessage: Message;
+      if (kbResult.exact) {
+        assistantMessage = {
+          role: 'assistant',
+          content: `${kbResult.response}\n\n[Verified information from our pregnancy knowledge base]`,
+          source: 'knowledge-base'
+        };
+      } else {
+        const llmResponse = await queryLLM(chatInput, kbResult.response);
+        assistantMessage = {
+          role: 'assistant',
+          content: llmResponse,
+          source: 'ai-general'
+        };
+      }
+      
+      setChatMessages(prev => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error("Chat error:", error);
+      setChatMessages(prev => [...prev, {
+        role: 'assistant',
+        content: "Sorry, I'm having trouble responding right now. Please try again later.",
+        source: 'error'
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const renderHome = () => (
@@ -728,6 +849,7 @@ export default function PregnancyTrackerApp() {
           <MessageCircle className="w-6 h-6 mr-2" />
           Pregnancy Assistant
         </h2>
+        <p className="text-xs text-gray-500 mt-1">Powered by Hugging Face AI</p>
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -739,9 +861,32 @@ export default function PregnancyTrackerApp() {
                 : 'bg-gray-100 text-gray-800'
             }`}>
               <p className="whitespace-pre-wrap">{msg.content}</p>
+              {msg.source === 'knowledge-base' && (
+                <p className="text-xs mt-2 text-green-600 flex items-center">
+                  <CheckCircle className="w-3 h-3 mr-1" />
+                  Verified medical information
+                </p>
+              )}
+              {msg.source === 'ai-general' && (
+                <p className="text-xs mt-2 text-yellow-600 flex items-center">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  General advice - consult your doctor
+                </p>
+              )}
             </div>
           </div>
         ))}
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="max-w-[70%] p-3 rounded-lg bg-gray-100 text-gray-800">
+              <div className="flex space-x-2">
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce"></div>
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={chatEndRef} />
       </div>
       
@@ -753,14 +898,19 @@ export default function PregnancyTrackerApp() {
             onChange={(e) => setChatInput(e.target.value)}
             placeholder="Ask about symptoms, medications, or pregnancy..."
             className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            disabled={isLoading}
           />
           <button
             type="submit"
-            className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+            className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50"
+            disabled={isLoading || !chatInput.trim()}
           >
             <Send className="w-5 h-5" />
           </button>
         </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Free AI service may have limited responses. For complex questions, consult your healthcare provider.
+        </p>
       </form>
     </div>
   );
@@ -815,7 +965,7 @@ export default function PregnancyTrackerApp() {
                     name="dueDate"
                     required
                     className="w-full p-2 border rounded-lg"
-                    min={new Date().toISOString().split('T')[0]} // Prevent past dates
+                    min={new Date().toISOString().split('T')[0]}
                   />
                 </div>
                 <button
@@ -888,4 +1038,6 @@ export default function PregnancyTrackerApp() {
       </div>
     </div>
   );
-}
+};
+
+export default PregnancyTrackerApp;
