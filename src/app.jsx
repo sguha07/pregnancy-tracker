@@ -310,8 +310,12 @@ export default function PregnancyTrackerApp() {
             </div>
           </div>
           <button
-            onClick={() => setShowDueDateModal(true)}
-            className="text-sm text-purple-600 underline"
+            onClick={() => {
+              console.log('Update due date clicked');
+              setShowDueDateModal(true);
+            }}
+            className="px-3 py-1 text-sm text-purple-600 hover:text-purple-800 underline cursor-pointer"
+            type="button"
           >
             Update Due Date
           </button>
@@ -589,26 +593,6 @@ export default function PregnancyTrackerApp() {
       <div className="bg-white p-6 rounded-xl shadow-md">
         <h2 className="text-2xl font-bold mb-4">Nutrition Planner</h2>
         
-        <div className="mb-6">
-          <h3 className="font-semibold mb-3">Daily Nutritional Requirements</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {nutritionalReqs.dailyMacros.map((nutrient, i) => (
-              <div key={i} className="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="font-semibold">{nutrient.nutrient}</h4>
-                    <p className="text-sm text-gray-600 capitalize">{nutrient.category}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-purple-600">{nutrient.amount}</p>
-                    <p className="text-sm text-gray-600">{nutrient.unit}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
         <div className="mb-6">
           <h3 className="font-semibold mb-3">Daily Nutritional Requirements</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
